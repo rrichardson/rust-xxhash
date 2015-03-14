@@ -22,10 +22,10 @@
 #![crate_type="lib"]
 
 #![feature(int_uint)]
+#![feature(hash)]
+#![feature(core)]
 #![allow(unused_assignments, unused_variables)] // `read_ptr!`
-#![allow(unstable)]
 
-#[macro_use] extern crate core;
 
 #[cfg(test)]
 extern crate test;
@@ -33,8 +33,8 @@ extern crate test;
 use std::mem::{uninitialized, transmute};
 use std::num::Int;
 use std::raw::{Repr};
-use std::ptr::{copy_memory};
-use std::hash::{Hash, Hasher, Writer};
+use std::ptr::{copy};
+use std::hash::{Hash, Hasher};
 use std::default::Default;
 
 #[cfg(test)] use test::Bencher;
@@ -86,9 +86,74 @@ impl XXHasher {
     pub fn new() -> XXHasher { #![inline]
         XXHasher::new_with_seed(HAPPY_SEED)
     }
+
+    /// Reinitialize. The next input will start a new hash.
+    fn reset(&mut self) { #![inline]
+        self.v1 = self.seed + PRIME1 + PRIME2;
+        self.v2 = self.seed + PRIME2;
+        self.v3 = self.seed;
+        self.v4 = self.seed - PRIME1;
+        self.total_len = 0;
+        self.memsize = 0;
+    }
 }
 
-impl Writer for XXHasher {
+impl Hasher for XXHasher {
+
+    /// Compute the hash. This can be used for intermediate values too.
+    fn finish(&self) -> u64 { #![inline] unsafe {
+        let mut rem = self.memsize;
+        let mut h64: u64 = if self.total_len < 32 {
+            self.seed + PRIME5
+        } else {
+            // we have saved state
+            let mut v1: u64 = self.v1;
+            let mut v2: u64 = self.v2;
+            let mut v3: u64 = self.v3;
+            let mut v4: u64 = self.v4;
+
+            let mut h = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
+
+            macro_rules! permute(($v: ident) => ({
+                $v *= PRIME2; $v = rotl64($v, 31); $v *= PRIME1; h ^= $v; h = h * PRIME1 + PRIME4;
+            }));
+            // this step does not exist in xxh32
+            permute!(v1); permute!(v2); permute!(v3); permute!(v4);
+
+            h
+        };
+
+        // and now we eat all the remaining bytes.
+        let mut p: *const u8 = transmute(&self.memory);
+        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u64));
+
+        h64 += self.total_len as u64;
+
+        while rem >= 8 {
+            let mut k1: u64 = read!(u64) * PRIME2; k1 = rotl64(k1, 31); k1 *= PRIME1;
+            h64 ^= k1;
+            h64 = rotl64(h64, 27) * PRIME1 + PRIME4;
+        }
+
+        if rem >= 4 {
+            h64 ^= read!(u32) * PRIME1;
+            h64 = rotl64(h64, 23) * PRIME2 + PRIME3;
+        }
+
+        while rem > 0 {
+            h64 ^= read!(u8) * PRIME5;
+            h64 = rotl64(h64, 11) * PRIME1;
+        }
+
+        h64 ^= h64 >> 33;
+        h64 *= PRIME2;
+        h64 ^= h64 >> 29;
+        h64 *= PRIME3;
+        h64 ^= h64 >> 32;
+
+        h64
+    }}
+
     /// This is where you feed your data in.
     fn write(&mut self, input: &[u8]) { unsafe {
         let mem: *mut u8 = transmute(&self.memory);
@@ -101,7 +166,7 @@ impl Writer for XXHasher {
         // so just fill the buffer and return.
         if self.memsize + rem < 32 {
             let dst: *mut u8 = mem.offset(self.memsize as int);
-            copy_memory(dst, data, rem);
+            copy(dst, data, rem);
             self.memsize += rem;
             return;
         }
@@ -111,7 +176,7 @@ impl Writer for XXHasher {
         if self.memsize != 0 {
             let dst: *mut u8 = mem.offset(self.memsize as int);
             let bump: usize = 32 - self.memsize;
-            copy_memory(dst, data, bump);
+            copy(dst, data, bump);
 
             // `read_ptr!` target
             let mut p: *const u8 = transmute(mem);
@@ -171,77 +236,9 @@ impl Writer for XXHasher {
 
         // we have data left, so save it
         if rem > 0 {
-            copy_memory(mem, data, rem);
+            copy(mem, data, rem);
             self.memsize = rem;
         }
-    }}
-}
-
-impl Hasher for XXHasher {
-    type Output = u64;
-
-    /// Reinitialize. The next input will start a new hash.
-    fn reset(&mut self) { #![inline]
-        self.v1 = self.seed + PRIME1 + PRIME2;
-        self.v2 = self.seed + PRIME2;
-        self.v3 = self.seed;
-        self.v4 = self.seed - PRIME1;
-        self.total_len = 0;
-        self.memsize = 0;
-    }
-
-    /// Compute the hash. This can be used for intermediate values too.
-    fn finish(&self) -> u64 { #![inline] unsafe {
-        let mut rem = self.memsize;
-        let mut h64: u64 = if self.total_len < 32 {
-            self.seed + PRIME5
-        } else {
-            // we have saved state
-            let mut v1: u64 = self.v1;
-            let mut v2: u64 = self.v2;
-            let mut v3: u64 = self.v3;
-            let mut v4: u64 = self.v4;
-
-            let mut h = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
-
-            macro_rules! permute(($v: ident) => ({
-                $v *= PRIME2; $v = rotl64($v, 31); $v *= PRIME1; h ^= $v; h = h * PRIME1 + PRIME4;
-            }));
-            // this step does not exist in xxh32
-            permute!(v1); permute!(v2); permute!(v3); permute!(v4);
-
-            h
-        };
-
-        // and now we eat all the remaining bytes.
-        let mut p: *const u8 = transmute(&self.memory);
-        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u64));
-
-        h64 += self.total_len as u64;
-
-        while rem >= 8 {
-            let mut k1: u64 = read!(u64) * PRIME2; k1 = rotl64(k1, 31); k1 *= PRIME1;
-            h64 ^= k1;
-            h64 = rotl64(h64, 27) * PRIME1 + PRIME4;
-        }
-
-        if rem >= 4 {
-            h64 ^= read!(u32) * PRIME1;
-            h64 = rotl64(h64, 23) * PRIME2 + PRIME3;
-        }
-
-        while rem > 0 {
-            h64 ^= read!(u8) * PRIME5;
-            h64 = rotl64(h64, 11) * PRIME1;
-        }
-
-        h64 ^= h64 >> 33;
-        h64 *= PRIME2;
-        h64 ^= h64 >> 29;
-        h64 *= PRIME3;
-        h64 ^= h64 >> 32;
-
-        h64
     }}
 
 }
@@ -258,14 +255,14 @@ impl Default for XXHasher {
     }
 }
 
-pub fn hash<T: ?Sized + Hash<XXHasher>>(value: &T) -> u64
+pub fn hash<T: ?Sized + Hash>(value: &T) -> u64
 {
     let mut state = XXHasher::new();
     value.hash(&mut state);
     state.finish()
 }
 
-pub fn hash_with_seed<T: Hash<XXHasher>>(seed: u64, value: &T) -> u64 { #![inline]
+pub fn hash_with_seed<T: Hash>(seed: u64, value: &T) -> u64 { #![inline]
     let mut state = XXHasher::new_with_seed(seed);
     value.hash(&mut state);
     state.finish()
@@ -284,7 +281,7 @@ fn test_base<F>(f: F) where F: Fn(&[u8], u64) -> u64 {
         random *= random;
     }
 
-    let test = |&: size: usize, seed: u64, expected: u64| {
+    let test = |size: usize, seed: u64, expected: u64| {
         let result = f(buf.slice_to(size), seed);
         assert_eq!(result, expected);
     };
@@ -335,7 +332,7 @@ fn test_chunks() {
 
 #[bench]
 fn bench_64k_oneshot(b: &mut Bencher) {
-    bench_base(b, |&: v| oneshot(v, 0))
+    bench_base(b, |v| oneshot(v, 0))
 }
 
 /*

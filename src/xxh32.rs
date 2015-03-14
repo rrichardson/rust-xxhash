@@ -1,8 +1,8 @@
 use std::mem::{uninitialized,transmute};
 use std::num::Int;
 use std::raw::{Repr};
-use std::ptr::{copy_memory};
-use std::hash::{Hash, Hasher, Writer};
+use std::ptr::{copy};
+use std::hash::{Hash, Hasher};
 use std::default::Default;
 
 #[cfg(test)] use test::Bencher;
@@ -20,7 +20,7 @@ static PRIME5: u32 = 374761393;
 pub fn oneshot(input: &[u8], seed: u32) -> u32 {
     let mut state = XXHasher::new_with_seed(seed);
     state.write(input);
-    state.finish()
+    state.finish() as u32
 }
 
 #[derive(Copy)]
@@ -48,9 +48,53 @@ impl XXHasher {
     pub fn new() -> XXHasher { #![inline]
         XXHasher::new_with_seed(0)
     }
+
+    fn reset(&mut self) { #![inline]
+        self.v1 = self.seed + PRIME1 + PRIME2;
+        self.v2 = self.seed + PRIME2;
+        self.v3 = self.seed;
+        self.v4 = self.seed - PRIME1;
+        self.total_len = 0;
+        self.memsize = 0;
+    }
 }
 
-impl Writer for XXHasher {
+impl Hasher for XXHasher {
+
+
+    /// Can be called on intermediate states
+    fn finish(&self) -> u64 { unsafe {
+        let mut rem = self.memsize;
+        let mut h32: u32 = if self.total_len < 16 {
+            self.seed + PRIME5
+        } else {
+            rotl32(self.v1, 1) + rotl32(self.v2, 7) + rotl32(self.v3, 12) + rotl32(self.v4, 18)
+        };
+
+        let mut p: *const u8 = transmute(&self.memory);
+        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u32));
+
+        h32 += self.total_len as u32;
+
+        while rem >= 4 {
+            h32 += read!(u32) * PRIME3;
+            h32 = rotl32(h32, 17) * PRIME4;
+        }
+
+        while rem > 0 {
+            h32 += read!(u8) * PRIME5;
+            h32 = rotl32(h32, 11) * PRIME1;
+        }
+
+        h32 ^= h32 >> 15;
+        h32 *= PRIME2;
+        h32 ^= h32 >> 13;
+        h32 *= PRIME3;
+        h32 ^= h32 >> 16;
+
+        h32 as u64
+    }}
+
     fn write(&mut self, input: &[u8]) { unsafe {
         let mem: *mut u8 = transmute(&self.memory);
         let mut rem: usize = input.len();
@@ -61,7 +105,7 @@ impl Writer for XXHasher {
         if self.memsize + rem < 16 {
             // not enough data for one 32-byte chunk, so just fill the buffer and return.
             let dst: *mut u8 = mem.offset(self.memsize as int);
-            copy_memory(dst, data, rem);
+            copy(dst, data, rem);
             self.memsize += rem;
             return;
         }
@@ -71,7 +115,7 @@ impl Writer for XXHasher {
             // fill the buffer and eat it
             let dst: *mut u8 = mem.offset(self.memsize as int);
             let bump: usize = 16 - self.memsize;
-            copy_memory(dst, data, bump);
+            copy(dst, data, bump);
             let mut p: *const u8 = transmute(mem);
             let mut r: usize = 32;
 
@@ -121,56 +165,11 @@ impl Writer for XXHasher {
         }
 
         if rem > 0 {
-            copy_memory(mem, data, rem);
+            copy(mem, data, rem);
             self.memsize = rem;
         }
     }}
-}
 
-impl Hasher for XXHasher {
-    type Output = u32;
-
-    fn reset(&mut self) { #![inline]
-        self.v1 = self.seed + PRIME1 + PRIME2;
-        self.v2 = self.seed + PRIME2;
-        self.v3 = self.seed;
-        self.v4 = self.seed - PRIME1;
-        self.total_len = 0;
-        self.memsize = 0;
-    }
-
-    /// Can be called on intermediate states
-    fn finish(&self) -> u32 { unsafe {
-        let mut rem = self.memsize;
-        let mut h32: u32 = if self.total_len < 16 {
-            self.seed + PRIME5
-        } else {
-            rotl32(self.v1, 1) + rotl32(self.v2, 7) + rotl32(self.v3, 12) + rotl32(self.v4, 18)
-        };
-
-        let mut p: *const u8 = transmute(&self.memory);
-        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u32));
-
-        h32 += self.total_len as u32;
-
-        while rem >= 4 {
-            h32 += read!(u32) * PRIME3;
-            h32 = rotl32(h32, 17) * PRIME4;
-        }
-
-        while rem > 0 {
-            h32 += read!(u8) * PRIME5;
-            h32 = rotl32(h32, 11) * PRIME1;
-        }
-
-        h32 ^= h32 >> 15;
-        h32 *= PRIME2;
-        h32 ^= h32 >> 13;
-        h32 *= PRIME3;
-        h32 ^= h32 >> 16;
-
-        h32
-    }}
 }
 
 impl Clone for XXHasher {
@@ -185,13 +184,13 @@ impl Default for XXHasher {
     }
 }
 
-pub fn hash<T: Hash<XXHasher>>(value: &T) -> u64 { #![inline]
+pub fn hash<T: Hash>(value: &T) -> u64 { #![inline]
     let mut state = XXHasher::new_with_seed(0);
     value.hash(&mut state);
     state.finish() as u64
 }
 
-pub fn hash_with_seed<T: Hash<XXHasher>>(seed: u64, value: &T) -> u64 { #![inline]
+pub fn hash_with_seed<T: Hash>(seed: u64, value: &T) -> u64 { #![inline]
     let mut state = XXHasher::new_with_seed(seed as u32);
     value.hash(&mut state);
     state.finish() as u64
@@ -212,7 +211,7 @@ fn test_base<F>(f: F)
         random *= random;
     }
 
-    let test = |&: size: usize, seed: u32, expected: u32| {
+    let test = |size: usize, seed: u32, expected: u32| {
         let result = f(buf.slice_to(size), seed);
         assert_eq!(result, expected);
     };
@@ -237,13 +236,13 @@ fn bench_base<F>(bench: &mut Bencher, f: F)
         v.push(i as u8);
     }
 
-    bench.iter( |&:| f(v.as_slice()) );
+    bench.iter( || f(v.as_slice()) );
     bench.bytes = BUFSIZE as u64;
 }
 
 #[test]
 fn test_oneshot() {
-    test_base(|&: v, seed|{
+    test_base(|v, seed|{
         let mut state = XXHasher::new_with_seed(seed);
         state.write(v);
         state.finish()

@@ -5,7 +5,7 @@
 #[macro_export]
 macro_rules! read_ptr(($p:ident, $rem:ident, $size:ty) => ({
     #[allow(unused_assignments)]
-    use core::mem;
+    use std::mem;
     let mut dp: *const $size = mem::transmute($p);
     let data: $size = *dp;
     dp = dp.offset(1);
