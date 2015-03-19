@@ -262,7 +262,7 @@ pub fn hash<T: ?Sized + Hash>(value: &T) -> u64
     state.finish()
 }
 
-pub fn hash_with_seed<T: Hash>(seed: u64, value: &T) -> u64 { #![inline]
+pub fn hash_with_seed<T: ?Sized + Hash>(seed: u64, value: &T) -> u64 { #![inline]
     let mut state = XXHasher::new_with_seed(seed);
     value.hash(&mut state);
     state.finish()
