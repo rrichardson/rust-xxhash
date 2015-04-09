@@ -21,9 +21,6 @@
 #![crate_name="xxhash"]
 #![crate_type="lib"]
 
-#![feature(int_uint)]
-#![feature(hash)]
-#![feature(core)]
 #![allow(unused_assignments, unused_variables)] // `read_ptr!`
 
 
@@ -31,8 +28,6 @@
 extern crate test;
 
 use std::mem::{uninitialized, transmute};
-use std::num::Int;
-use std::raw::{Repr};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
@@ -158,15 +153,15 @@ impl Hasher for XXHasher {
     fn write(&mut self, input: &[u8]) { unsafe {
         let mem: *mut u8 = transmute(&self.memory);
         let mut rem: usize = input.len();
-        let mut data: *const u8 = input.repr().data;
+        let mut data: *const u8 = input.as_ptr();
 
         self.total_len += rem as u64;
 
         // not enough data for one 32-byte chunk,
         // so just fill the buffer and return.
         if self.memsize + rem < 32 {
-            let dst: *mut u8 = mem.offset(self.memsize as int);
-            copy(dst, data, rem);
+            let dst: *mut u8 = mem.offset(self.memsize as isize);
+            copy(data, dst, rem);
             self.memsize += rem;
             return;
         }
@@ -174,9 +169,9 @@ impl Hasher for XXHasher {
         // some data left from previous update
         // fill the buffer and eat it
         if self.memsize != 0 {
-            let dst: *mut u8 = mem.offset(self.memsize as int);
+            let dst: *mut u8 = mem.offset(self.memsize as isize);
             let bump: usize = 32 - self.memsize;
-            copy(dst, data, bump);
+            copy(data, dst, bump);
 
             // `read_ptr!` target
             let mut p: *const u8 = transmute(mem);
@@ -203,7 +198,7 @@ impl Hasher for XXHasher {
             self.v3 = v3;
             self.v4 = v4;
 
-            data = data.offset(bump as int);
+            data = data.offset(bump as isize);
             rem -= bump;
             self.memsize = 0;
         }
@@ -236,7 +231,7 @@ impl Hasher for XXHasher {
 
         // we have data left, so save it
         if rem > 0 {
-            copy(mem, data, rem);
+            copy(data, mem, rem);
             self.memsize = rem;
         }
     }}

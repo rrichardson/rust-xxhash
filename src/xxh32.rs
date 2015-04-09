@@ -1,6 +1,4 @@
 use std::mem::{uninitialized,transmute};
-use std::num::Int;
-use std::raw::{Repr};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
@@ -98,14 +96,14 @@ impl Hasher for XXHasher {
     fn write(&mut self, input: &[u8]) { unsafe {
         let mem: *mut u8 = transmute(&self.memory);
         let mut rem: usize = input.len();
-        let mut data: *const u8 = input.repr().data;
+        let mut data: *const u8 = input.as_ptr();
 
         self.total_len += rem as u64;
 
         if self.memsize + rem < 16 {
             // not enough data for one 32-byte chunk, so just fill the buffer and return.
-            let dst: *mut u8 = mem.offset(self.memsize as int);
-            copy(dst, data, rem);
+            let dst: *mut u8 = mem.offset(self.memsize as isize);
+            copy(data, dst, rem);
             self.memsize += rem;
             return;
         }
@@ -113,9 +111,9 @@ impl Hasher for XXHasher {
         if self.memsize != 0 {
             // some data left from previous update
             // fill the buffer and eat it
-            let dst: *mut u8 = mem.offset(self.memsize as int);
+            let dst: *mut u8 = mem.offset(self.memsize as isize);
             let bump: usize = 16 - self.memsize;
-            copy(dst, data, bump);
+            copy(data, dst, bump);
             let mut p: *const u8 = transmute(mem);
             let mut r: usize = 32;
 
@@ -137,7 +135,7 @@ impl Hasher for XXHasher {
             self.v3 = v3;
             self.v4 = v4;
 
-            data = data.offset(bump as int);
+            data = data.offset(bump as isize);
             rem -= bump;
             self.memsize = 0;
         }
@@ -165,7 +163,7 @@ impl Hasher for XXHasher {
         }
 
         if rem > 0 {
-            copy(mem, data, rem);
+            copy(data, mem, rem);
             self.memsize = rem;
         }
     }}
