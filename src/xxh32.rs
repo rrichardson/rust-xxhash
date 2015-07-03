@@ -204,7 +204,7 @@ fn test_base<F>(f: F)
 
     let mut random: u32 = PRIME;
     let mut buf: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for _ in range(0, BUFSIZE) {
+    for _ in 0..BUFSIZE {
         buf.push((random >> 24) as u8);
         random *= random;
     }
@@ -230,7 +230,7 @@ fn bench_base<F>(bench: &mut Bencher, f: F)
     static BUFSIZE: usize = 64*1024;
 
     let mut v: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for i in range(0, BUFSIZE) {
+    for i in 0..BUFSIZE {
         v.push(i as u8);
     }
 
