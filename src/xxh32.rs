@@ -2,19 +2,21 @@ use std::mem::{uninitialized,transmute};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
+use std::num::Wrapping;
+use std::ops::{Shl, Shr, BitOr};
 
 // unstable
 //#[cfg(test)] use test::Bencher;
 
-fn rotl32(x: u32, b: usize) -> u32 { #![inline(always)]
-    ((x << b) | (x >> (32 - b)))
+fn rotl32<T: Shl<usize, Output=T> + Shr<usize, Output=T> + BitOr<T, Output=T> + Clone>(x: T, b: usize) -> T { #![inline(always)]
+    ((x.clone() << b) | (x.clone() >> (32 - b)))
 }
 
-static PRIME1: u32 = 2654435761;
-static PRIME2: u32 = 2246822519;
-static PRIME3: u32 = 3266489917;
-static PRIME4: u32 = 668265263;
-static PRIME5: u32 = 374761393;
+static PRIME1: Wrapping<u32> = Wrapping(2654435761);
+static PRIME2: Wrapping<u32> = Wrapping(2246822519);
+static PRIME3: Wrapping<u32> = Wrapping(3266489917);
+static PRIME4: Wrapping<u32> = Wrapping(668265263);
+static PRIME5: Wrapping<u32> = Wrapping(374761393);
 
 pub fn oneshot(input: &[u8], seed: u32) -> u32 {
     let mut state = XXHasher::new_with_seed(seed);
@@ -49,10 +51,10 @@ impl XXHasher {
     }
 
     fn reset(&mut self) { #![inline]
-        self.v1 = self.seed + PRIME1 + PRIME2;
-        self.v2 = self.seed + PRIME2;
+        self.v1 = (Wrapping(self.seed) + PRIME1 + PRIME2).0;
+        self.v2 = (Wrapping(self.seed) + PRIME2).0;
         self.v3 = self.seed;
-        self.v4 = self.seed - PRIME1;
+        self.v4 = (Wrapping(self.seed) - PRIME1).0;
         self.total_len = 0;
         self.memsize = 0;
     }
@@ -64,34 +66,34 @@ impl Hasher for XXHasher {
     /// Can be called on intermediate states
     fn finish(&self) -> u64 { unsafe {
         let mut rem = self.memsize;
-        let mut h32: u32 = if self.total_len < 16 {
-            self.seed + PRIME5
+        let mut h32: Wrapping<u32> = if self.total_len < 16 {
+            Wrapping(self.seed) + PRIME5
         } else {
-            rotl32(self.v1, 1) + rotl32(self.v2, 7) + rotl32(self.v3, 12) + rotl32(self.v4, 18)
+            rotl32(Wrapping(self.v1), 1) + rotl32(Wrapping(self.v2), 7) + rotl32(Wrapping(self.v3), 12) + rotl32(Wrapping(self.v4), 18)
         };
 
         let mut p: *const u8 = transmute(&self.memory);
-        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u32));
+        macro_rules! read(($size:ty) => (Wrapping(read_ptr!(p, rem, $size) as u32)));
 
-        h32 += self.total_len as u32;
+        h32 = h32 + Wrapping(self.total_len as u32);
 
         while rem >= 4 {
-            h32 += read!(u32) * PRIME3;
+            h32 = h32 + read!(u32) * PRIME3;
             h32 = rotl32(h32, 17) * PRIME4;
         }
 
         while rem > 0 {
-            h32 += read!(u8) * PRIME5;
+            h32 = h32 + read!(u8) * PRIME5;
             h32 = rotl32(h32, 11) * PRIME1;
         }
 
-        h32 ^= h32 >> 15;
-        h32 *= PRIME2;
-        h32 ^= h32 >> 13;
-        h32 *= PRIME3;
-        h32 ^= h32 >> 16;
+        h32 = h32.clone() ^ (h32.clone() >> 15);
+        h32 = h32 * PRIME2;
+        h32 = h32.clone() ^ (h32.clone() >> 13);
+        h32 = h32 * PRIME3;
+        h32 = h32.clone() ^ (h32.clone() >> 16);
 
-        h32 as u64
+        h32.0 as u64
     }}
 
     fn write(&mut self, input: &[u8]) { unsafe {
@@ -118,23 +120,23 @@ impl Hasher for XXHasher {
             let mut p: *const u8 = transmute(mem);
             let mut r: usize = 32;
 
-            macro_rules! read(() => (read_ptr!(p, r, u32)));
+            macro_rules! read(() => (Wrapping(read_ptr!(p, r, u32))));
 
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl32($v, 13); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl32($v, 13); $v = $v * PRIME1;
             }));
 
-            let mut v1: u32 = self.v1;
-            let mut v2: u32 = self.v2;
-            let mut v3: u32 = self.v3;
-            let mut v4: u32 = self.v4;
+            let mut v1: Wrapping<u32> = Wrapping(self.v1);
+            let mut v2: Wrapping<u32> = Wrapping(self.v2);
+            let mut v3: Wrapping<u32> = Wrapping(self.v3);
+            let mut v4: Wrapping<u32> = Wrapping(self.v4);
 
             eat!(v1); eat!(v2); eat!(v3); eat!(v4);
 
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
 
             data = data.offset(bump as isize);
             rem -= bump;
@@ -142,25 +144,25 @@ impl Hasher for XXHasher {
         }
 
         {
-            macro_rules! read(() => (read_ptr!(data, rem, u32)));
+            macro_rules! read(() => (Wrapping(read_ptr!(data, rem, u32))));
 
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl32($v, 13); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl32($v, 13); $v = $v * PRIME1;
             }));
 
-            let mut v1: u32 = self.v1;
-            let mut v2: u32 = self.v2;
-            let mut v3: u32 = self.v3;
-            let mut v4: u32 = self.v4;
+            let mut v1: Wrapping<u32> = Wrapping(self.v1);
+            let mut v2: Wrapping<u32> = Wrapping(self.v2);
+            let mut v3: Wrapping<u32> = Wrapping(self.v3);
+            let mut v4: Wrapping<u32> = Wrapping(self.v4);
 
             while rem >= 16 {
                 eat!(v1); eat!(v2); eat!(v3); eat!(v4);
             }
 
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
         }
 
         if rem > 0 {
@@ -203,11 +205,11 @@ fn test_base<F>(f: F)
     static BUFSIZE: usize = 101;
     static PRIME: u32 = 2654435761;
 
-    let mut random: u32 = PRIME;
+    let mut random: Wrapping<u32> = Wrapping(PRIME);
     let mut buf: Vec<u8> = Vec::with_capacity(BUFSIZE);
     for _ in 0..BUFSIZE {
-        buf.push((random >> 24) as u8);
-        random *= random;
+        buf.push((random.0 >> 24) as u8);
+        random = random * random;
     }
 
     let test = |size: usize, seed: u32, expected: u32| {
