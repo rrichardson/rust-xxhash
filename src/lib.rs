@@ -277,7 +277,7 @@ fn test_base<F>(f: F) where F: Fn(&[u8], u64) -> u64 {
     }
 
     let test = |size: usize, seed: u64, expected: u64| {
-        let result = f(buf.slice_to(size), seed);
+        let result = f(buf.split_at(size).0, seed);
         assert_eq!(result, expected);
     };
 
@@ -405,8 +405,9 @@ fn test_hash_no_concat_alias() {
     assert!(s != t && t != u);
     assert!(hash(&s) != hash(&t) && hash(&s) != hash(&u));
 
-    let v: (&[u8], &[u8], &[u8]) = (&[1u8], &[0u8, 0], &[0u8]);
-    let w: (&[u8], &[u8], &[u8]) = (&[1u8, 0, 0, 0], &[], &[]);
+    let a = [1u8, 0, 0, 0];
+    let v: (&[u8], &[u8], &[u8]) = (&a[0..1], &a[1..3], &a[1..2]);
+    let w: (&[u8], &[u8], &[u8]) = (&a[..], &a[0..0], &a[0..0]);
 
     assert!(v != w);
     assert!(hash(&v) != hash(&w));
