@@ -24,15 +24,19 @@
 #![allow(unused_assignments, unused_variables)] // `read_ptr!`
 
 
-#[cfg(test)]
-extern crate test;
+// unstable
+//#[cfg(test)]
+// extern crate test;
 
 use std::mem::{uninitialized, transmute};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
+use std::num::Wrapping;
+use std::ops::{Shl, Shr, BitOr};
 
-#[cfg(test)] use test::Bencher;
+//unstable
+//#[cfg(test)] use test::Bencher;
 
 pub mod macros;
 pub mod xxh32;
@@ -40,14 +44,14 @@ pub mod xxh32;
 // large prime, new_with_seed(0) is so boring
 const HAPPY_SEED: u64 = 18446744073709551557_u64;
 
-const PRIME1: u64 =     11400714785074694791_u64;
-const PRIME2: u64 =     14029467366897019727_u64;
-const PRIME3: u64 =      1609587929392839161_u64;
-const PRIME4: u64 =      9650029242287828579_u64;
-const PRIME5: u64 =      2870177450012600261_u64;
+const PRIME1: Wrapping<u64> =     Wrapping(11400714785074694791_u64);
+const PRIME2: Wrapping<u64> =     Wrapping(14029467366897019727_u64);
+const PRIME3: Wrapping<u64> =     Wrapping( 1609587929392839161_u64);
+const PRIME4: Wrapping<u64> =     Wrapping( 9650029242287828579_u64);
+const PRIME5: Wrapping<u64> =     Wrapping( 2870177450012600261_u64);
 
-fn rotl64(x: u64, b: usize) -> u64 { #![inline(always)]
-    (x << b) | (x >> (64 - b))
+fn rotl64<T: Shl<usize, Output=T> + Shr<usize, Output=T> + BitOr<T, Output=T> + Clone>(x: T, b: usize) -> T { #![inline(always)]
+    (x.clone() << b) | (x.clone() >> (64 - b))
 }
 
 pub fn oneshot(input: &[u8], seed: u64) -> u64 { #![inline]
@@ -84,10 +88,10 @@ impl XXHasher {
 
     /// Reinitialize. The next input will start a new hash.
     fn reset(&mut self) { #![inline]
-        self.v1 = self.seed + PRIME1 + PRIME2;
-        self.v2 = self.seed + PRIME2;
+        self.v1 = (Wrapping(self.seed) + PRIME1 + PRIME2).0;
+        self.v2 = (Wrapping(self.seed) + PRIME2).0;
         self.v3 = self.seed;
-        self.v4 = self.seed - PRIME1;
+        self.v4 = (Wrapping(self.seed) - PRIME1).0;
         self.total_len = 0;
         self.memsize = 0;
     }
@@ -98,19 +102,19 @@ impl Hasher for XXHasher {
     /// Compute the hash. This can be used for intermediate values too.
     fn finish(&self) -> u64 { #![inline] unsafe {
         let mut rem = self.memsize;
-        let mut h64: u64 = if self.total_len < 32 {
-            self.seed + PRIME5
+        let mut h64: Wrapping<u64> = if self.total_len < 32 {
+            Wrapping(self.seed) + PRIME5
         } else {
             // we have saved state
-            let mut v1: u64 = self.v1;
-            let mut v2: u64 = self.v2;
-            let mut v3: u64 = self.v3;
-            let mut v4: u64 = self.v4;
+            let mut v1: Wrapping<u64> = Wrapping(self.v1);
+            let mut v2: Wrapping<u64> = Wrapping(self.v2);
+            let mut v3: Wrapping<u64> = Wrapping(self.v3);
+            let mut v4: Wrapping<u64> = Wrapping(self.v4);
 
             let mut h = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
 
             macro_rules! permute(($v: ident) => ({
-                $v *= PRIME2; $v = rotl64($v, 31); $v *= PRIME1; h ^= $v; h = h * PRIME1 + PRIME4;
+                $v = $v * PRIME2; $v = rotl64($v, 31); $v = $v * PRIME1; h = h ^ $v; h = h * PRIME1 + PRIME4;
             }));
             // this step does not exist in xxh32
             permute!(v1); permute!(v2); permute!(v3); permute!(v4);
@@ -120,33 +124,33 @@ impl Hasher for XXHasher {
 
         // and now we eat all the remaining bytes.
         let mut p: *const u8 = transmute(&self.memory);
-        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u64));
+        macro_rules! read(($size:ty) => (Wrapping(read_ptr!(p, rem, $size) as u64)));
 
-        h64 += self.total_len as u64;
+        h64 = h64 + Wrapping(self.total_len as u64);
 
         while rem >= 8 {
-            let mut k1: u64 = read!(u64) * PRIME2; k1 = rotl64(k1, 31); k1 *= PRIME1;
-            h64 ^= k1;
+            let mut k1: Wrapping<u64> = read!(u64) * PRIME2; k1 = rotl64(k1, 31); k1 = k1 * PRIME1;
+            h64 = h64 ^ k1;
             h64 = rotl64(h64, 27) * PRIME1 + PRIME4;
         }
 
         if rem >= 4 {
-            h64 ^= read!(u32) * PRIME1;
+            h64 = h64 ^ (read!(u32) * PRIME1);
             h64 = rotl64(h64, 23) * PRIME2 + PRIME3;
         }
 
         while rem > 0 {
-            h64 ^= read!(u8) * PRIME5;
+            h64 = h64 ^ (read!(u8) * PRIME5);
             h64 = rotl64(h64, 11) * PRIME1;
         }
 
-        h64 ^= h64 >> 33;
-        h64 *= PRIME2;
-        h64 ^= h64 >> 29;
-        h64 *= PRIME3;
-        h64 ^= h64 >> 32;
+        h64 = h64.clone() ^ (h64.clone() >> 33);
+        h64 = h64 * PRIME2;
+        h64 = h64.clone() ^ (h64.clone() >> 29);
+        h64 = h64 * PRIME3;
+        h64 = h64.clone() ^ (h64.clone() >> 32);
 
-        h64
+        h64.0
     }}
 
     /// This is where you feed your data in.
@@ -177,26 +181,26 @@ impl Hasher for XXHasher {
             let mut p: *const u8 = transmute(mem);
             let mut r = 32;
 
-            macro_rules! read(() => (read_ptr!(p, r, u64)));
+            macro_rules! read(() => (Wrapping(read_ptr!(p, r, u64))));
 
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl64($v, 31); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl64($v, 31); $v = $v * PRIME1;
             }));
 
             // Detaching these does good things to performance.
             // LLVM is not quite smart enough to do it on its own.
-            let mut v1: u64 = self.v1;
-            let mut v2: u64 = self.v2;
-            let mut v3: u64 = self.v3;
-            let mut v4: u64 = self.v4;
+            let mut v1: Wrapping<u64> = Wrapping(self.v1);
+            let mut v2: Wrapping<u64> = Wrapping(self.v2);
+            let mut v3: Wrapping<u64> = Wrapping(self.v3);
+            let mut v4: Wrapping<u64> = Wrapping(self.v4);
 
             eat!(v1); eat!(v2); eat!(v3); eat!(v4);
 
             // save the state
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
 
             data = data.offset(bump as isize);
             rem -= bump;
@@ -204,29 +208,29 @@ impl Hasher for XXHasher {
         }
 
         {
-            macro_rules! read(() => (read_ptr!(data, rem, u64)));
+            macro_rules! read(() => (Wrapping(read_ptr!(data, rem, u64))));
 
             // Note how `$v` does not depend on any other `v` in this phase.
             // This is critical for speed.
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl64($v, 31); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl64($v, 31); $v = $v * PRIME1;
             }));
 
             // again, go faster stripes
-            let mut v1: u64 = self.v1;
-            let mut v2: u64 = self.v2;
-            let mut v3: u64 = self.v3;
-            let mut v4: u64 = self.v4;
+            let mut v1: Wrapping<u64> = Wrapping(self.v1);
+            let mut v2: Wrapping<u64> = Wrapping(self.v2);
+            let mut v3: Wrapping<u64> = Wrapping(self.v3);
+            let mut v4: Wrapping<u64> = Wrapping(self.v4);
 
             // the main loop: eat whole chunks
             while rem >= 32 {
                 eat!(v1); eat!(v2); eat!(v3); eat!(v4);
             }
 
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
         }
 
         // we have data left, so save it
@@ -269,15 +273,15 @@ fn test_base<F>(f: F) where F: Fn(&[u8], u64) -> u64 {
     static BUFSIZE: usize = 101;
     static PRIME: u32 = 2654435761;
 
-    let mut random: u32 = PRIME;
+    let mut random: Wrapping<u32> = Wrapping(PRIME);
     let mut buf: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for _ in range(0, BUFSIZE) {
-        buf.push((random >> 24) as u8);
-        random *= random;
+    for _ in 0..BUFSIZE {
+        buf.push((random.0 >> 24) as u8);
+        random = random * random;
     }
 
     let test = |size: usize, seed: u64, expected: u64| {
-        let result = f(buf.slice_to(size), seed);
+        let result = f(buf.split_at(size).0, seed);
         assert_eq!(result, expected);
     };
 
@@ -289,7 +293,8 @@ fn test_base<F>(f: F) where F: Fn(&[u8], u64) -> u64 {
     test(BUFSIZE,          PRIME as u64,  0xCAA65939306F1E21);
 }
 
-#[cfg(test)]
+//unstable
+/*#[cfg(test)]
 #[inline(always)]
 fn bench_base<F>(bench: &mut Bencher, f: F )
     where F: Fn(&[u8]) -> u64
@@ -297,13 +302,13 @@ fn bench_base<F>(bench: &mut Bencher, f: F )
     static BUFSIZE: usize = 64*1024;
 
     let mut v: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for i in range(0, BUFSIZE) {
+    for i in 0..BUFSIZE {
         v.push(i as u8);
     }
 
     bench.iter( || f(v.as_slice()) );
     bench.bytes = BUFSIZE as u64;
-}
+}*/
 
 #[test]
 fn test_oneshot() {
@@ -325,10 +330,11 @@ fn test_chunks() {
     })
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_64k_oneshot(b: &mut Bencher) {
     bench_base(b, |v| oneshot(v, 0))
-}
+}*/
 
 /*
     * The following tests match those of SipHash.
@@ -405,14 +411,16 @@ fn test_hash_no_concat_alias() {
     assert!(s != t && t != u);
     assert!(hash(&s) != hash(&t) && hash(&s) != hash(&u));
 
-    let v: (&[u8], &[u8], &[u8]) = (&[1u8], &[0u8, 0], &[0u8]);
-    let w: (&[u8], &[u8], &[u8]) = (&[1u8, 0, 0, 0], &[], &[]);
+    let a = [1u8, 0, 0, 0];
+    let v: (&[u8], &[u8], &[u8]) = (&a[0..1], &a[1..3], &a[1..2]);
+    let w: (&[u8], &[u8], &[u8]) = (&a[..], &a[0..0], &a[0..0]);
 
     assert!(v != w);
     assert!(hash(&v) != hash(&w));
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_str_under_8_bytes(b: &mut Bencher) {
     let s = "foo";
     b.bytes=s.len() as u64;
@@ -460,7 +468,7 @@ fn bench_u64(b: &mut Bencher) {
     b.iter(|| {
         hash(&u)
     })
-}
+}*/
 
 
 

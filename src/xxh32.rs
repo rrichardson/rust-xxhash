@@ -2,18 +2,21 @@ use std::mem::{uninitialized,transmute};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
+use std::num::Wrapping;
+use std::ops::{Shl, Shr, BitOr};
 
-#[cfg(test)] use test::Bencher;
+// unstable
+//#[cfg(test)] use test::Bencher;
 
-fn rotl32(x: u32, b: usize) -> u32 { #![inline(always)]
-    ((x << b) | (x >> (32 - b)))
+fn rotl32<T: Shl<usize, Output=T> + Shr<usize, Output=T> + BitOr<T, Output=T> + Clone>(x: T, b: usize) -> T { #![inline(always)]
+    ((x.clone() << b) | (x.clone() >> (32 - b)))
 }
 
-static PRIME1: u32 = 2654435761;
-static PRIME2: u32 = 2246822519;
-static PRIME3: u32 = 3266489917;
-static PRIME4: u32 = 668265263;
-static PRIME5: u32 = 374761393;
+static PRIME1: Wrapping<u32> = Wrapping(2654435761);
+static PRIME2: Wrapping<u32> = Wrapping(2246822519);
+static PRIME3: Wrapping<u32> = Wrapping(3266489917);
+static PRIME4: Wrapping<u32> = Wrapping(668265263);
+static PRIME5: Wrapping<u32> = Wrapping(374761393);
 
 pub fn oneshot(input: &[u8], seed: u32) -> u32 {
     let mut state = XXHasher::new_with_seed(seed);
@@ -48,10 +51,10 @@ impl XXHasher {
     }
 
     fn reset(&mut self) { #![inline]
-        self.v1 = self.seed + PRIME1 + PRIME2;
-        self.v2 = self.seed + PRIME2;
+        self.v1 = (Wrapping(self.seed) + PRIME1 + PRIME2).0;
+        self.v2 = (Wrapping(self.seed) + PRIME2).0;
         self.v3 = self.seed;
-        self.v4 = self.seed - PRIME1;
+        self.v4 = (Wrapping(self.seed) - PRIME1).0;
         self.total_len = 0;
         self.memsize = 0;
     }
@@ -63,34 +66,34 @@ impl Hasher for XXHasher {
     /// Can be called on intermediate states
     fn finish(&self) -> u64 { unsafe {
         let mut rem = self.memsize;
-        let mut h32: u32 = if self.total_len < 16 {
-            self.seed + PRIME5
+        let mut h32: Wrapping<u32> = if self.total_len < 16 {
+            Wrapping(self.seed) + PRIME5
         } else {
-            rotl32(self.v1, 1) + rotl32(self.v2, 7) + rotl32(self.v3, 12) + rotl32(self.v4, 18)
+            rotl32(Wrapping(self.v1), 1) + rotl32(Wrapping(self.v2), 7) + rotl32(Wrapping(self.v3), 12) + rotl32(Wrapping(self.v4), 18)
         };
 
         let mut p: *const u8 = transmute(&self.memory);
-        macro_rules! read(($size:ty) => (read_ptr!(p, rem, $size) as u32));
+        macro_rules! read(($size:ty) => (Wrapping(read_ptr!(p, rem, $size) as u32)));
 
-        h32 += self.total_len as u32;
+        h32 = h32 + Wrapping(self.total_len as u32);
 
         while rem >= 4 {
-            h32 += read!(u32) * PRIME3;
+            h32 = h32 + read!(u32) * PRIME3;
             h32 = rotl32(h32, 17) * PRIME4;
         }
 
         while rem > 0 {
-            h32 += read!(u8) * PRIME5;
+            h32 = h32 + read!(u8) * PRIME5;
             h32 = rotl32(h32, 11) * PRIME1;
         }
 
-        h32 ^= h32 >> 15;
-        h32 *= PRIME2;
-        h32 ^= h32 >> 13;
-        h32 *= PRIME3;
-        h32 ^= h32 >> 16;
+        h32 = h32.clone() ^ (h32.clone() >> 15);
+        h32 = h32 * PRIME2;
+        h32 = h32.clone() ^ (h32.clone() >> 13);
+        h32 = h32 * PRIME3;
+        h32 = h32.clone() ^ (h32.clone() >> 16);
 
-        h32 as u64
+        h32.0 as u64
     }}
 
     fn write(&mut self, input: &[u8]) { unsafe {
@@ -117,23 +120,23 @@ impl Hasher for XXHasher {
             let mut p: *const u8 = transmute(mem);
             let mut r: usize = 32;
 
-            macro_rules! read(() => (read_ptr!(p, r, u32)));
+            macro_rules! read(() => (Wrapping(read_ptr!(p, r, u32))));
 
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl32($v, 13); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl32($v, 13); $v = $v * PRIME1;
             }));
 
-            let mut v1: u32 = self.v1;
-            let mut v2: u32 = self.v2;
-            let mut v3: u32 = self.v3;
-            let mut v4: u32 = self.v4;
+            let mut v1: Wrapping<u32> = Wrapping(self.v1);
+            let mut v2: Wrapping<u32> = Wrapping(self.v2);
+            let mut v3: Wrapping<u32> = Wrapping(self.v3);
+            let mut v4: Wrapping<u32> = Wrapping(self.v4);
 
             eat!(v1); eat!(v2); eat!(v3); eat!(v4);
 
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
 
             data = data.offset(bump as isize);
             rem -= bump;
@@ -141,25 +144,25 @@ impl Hasher for XXHasher {
         }
 
         {
-            macro_rules! read(() => (read_ptr!(data, rem, u32)));
+            macro_rules! read(() => (Wrapping(read_ptr!(data, rem, u32))));
 
             macro_rules! eat(($v: ident) => ({
-                $v += read!() * PRIME2; $v = rotl32($v, 13); $v *= PRIME1;
+                $v = $v + read!() * PRIME2; $v = rotl32($v, 13); $v = $v * PRIME1;
             }));
 
-            let mut v1: u32 = self.v1;
-            let mut v2: u32 = self.v2;
-            let mut v3: u32 = self.v3;
-            let mut v4: u32 = self.v4;
+            let mut v1: Wrapping<u32> = Wrapping(self.v1);
+            let mut v2: Wrapping<u32> = Wrapping(self.v2);
+            let mut v3: Wrapping<u32> = Wrapping(self.v3);
+            let mut v4: Wrapping<u32> = Wrapping(self.v4);
 
             while rem >= 16 {
                 eat!(v1); eat!(v2); eat!(v3); eat!(v4);
             }
 
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
+            self.v1 = v1.0;
+            self.v2 = v2.0;
+            self.v3 = v3.0;
+            self.v4 = v4.0;
         }
 
         if rem > 0 {
@@ -202,15 +205,15 @@ fn test_base<F>(f: F)
     static BUFSIZE: usize = 101;
     static PRIME: u32 = 2654435761;
 
-    let mut random: u32 = PRIME;
+    let mut random: Wrapping<u32> = Wrapping(PRIME);
     let mut buf: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for _ in range(0, BUFSIZE) {
-        buf.push((random >> 24) as u8);
-        random *= random;
+    for _ in 0..BUFSIZE {
+        buf.push((random.0 >> 24) as u8);
+        random = random * random;
     }
 
     let test = |size: usize, seed: u32, expected: u32| {
-        let result = f(buf.slice_to(size), seed);
+        let result = f(buf.split_at(size).0, seed);
         assert_eq!(result, expected);
     };
 
@@ -223,27 +226,28 @@ fn test_base<F>(f: F)
     test(BUFSIZE,          PRIME,  0x498EC8E2);
 }
 
-#[cfg(test)]
+// unstable
+/*#[cfg(test)]
 fn bench_base<F>(bench: &mut Bencher, f: F)
     where F: Fn(&[u8]) -> u32
 { #![inline(always)]
     static BUFSIZE: usize = 64*1024;
 
     let mut v: Vec<u8> = Vec::with_capacity(BUFSIZE);
-    for i in range(0, BUFSIZE) {
+    for i in 0..BUFSIZE {
         v.push(i as u8);
     }
 
     bench.iter( || f(v.as_slice()) );
     bench.bytes = BUFSIZE as u64;
-}
+}*/
 
 #[test]
 fn test_oneshot() {
     test_base(|v, seed|{
         let mut state = XXHasher::new_with_seed(seed);
         state.write(v);
-        state.finish()
+        state.finish() as u32
     })
 }
 
@@ -254,14 +258,15 @@ fn test_chunks() {
         for chunk in v.chunks(15) {
             state.write(chunk);
         }
-        state.finish()
+        state.finish() as u32
     })
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_64k_oneshot(b: &mut Bencher) {
     bench_base(b, |v| { oneshot(v, 0) })
-}
+}*/
 
 /*
     * The following tests match those of SipHash.
@@ -338,14 +343,16 @@ fn test_hash_no_concat_alias() {
     assert!(s != t && t != u);
     assert!(hash(&s) != hash(&t) && hash(&s) != hash(&u));
 
-    let v: (&[u8], &[u8], &[u8]) = (&[1u8], &[0u8, 0], &[0u8]);
-    let w: (&[u8], &[u8], &[u8]) = (&[1u8, 0, 0, 0], &[], &[]);
+    let a = [1u8, 0, 0, 0];
+    let v: (&[u8], &[u8], &[u8]) = (&a[0..1], &a[1..3], &a[1..2]);
+    let w: (&[u8], &[u8], &[u8]) = (&a[..], &a[0..0], &a[0..0]);
 
     assert!(v != w);
     assert!(hash(&v) != hash(&w));
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_str_under_8_bytes(b: &mut Bencher) {
     let s = "foo";
     b.bytes=s.len() as u64;
@@ -393,4 +400,4 @@ fn bench_u64(b: &mut Bencher) {
     b.iter(|| {
         hash(&u)
     })
-}
+}*/
