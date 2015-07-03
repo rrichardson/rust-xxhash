@@ -3,7 +3,8 @@ use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
 
-#[cfg(test)] use test::Bencher;
+// unstable
+//#[cfg(test)] use test::Bencher;
 
 fn rotl32(x: u32, b: usize) -> u32 { #![inline(always)]
     ((x << b) | (x >> (32 - b)))
@@ -223,7 +224,8 @@ fn test_base<F>(f: F)
     test(BUFSIZE,          PRIME,  0x498EC8E2);
 }
 
-#[cfg(test)]
+// unstable
+/*#[cfg(test)]
 fn bench_base<F>(bench: &mut Bencher, f: F)
     where F: Fn(&[u8]) -> u32
 { #![inline(always)]
@@ -236,7 +238,7 @@ fn bench_base<F>(bench: &mut Bencher, f: F)
 
     bench.iter( || f(v.as_slice()) );
     bench.bytes = BUFSIZE as u64;
-}
+}*/
 
 #[test]
 fn test_oneshot() {
@@ -258,10 +260,11 @@ fn test_chunks() {
     })
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_64k_oneshot(b: &mut Bencher) {
     bench_base(b, |v| { oneshot(v, 0) })
-}
+}*/
 
 /*
     * The following tests match those of SipHash.
@@ -346,7 +349,8 @@ fn test_hash_no_concat_alias() {
     assert!(hash(&v) != hash(&w));
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_str_under_8_bytes(b: &mut Bencher) {
     let s = "foo";
     b.bytes=s.len() as u64;
@@ -394,4 +398,4 @@ fn bench_u64(b: &mut Bencher) {
     b.iter(|| {
         hash(&u)
     })
-}
+}*/

@@ -24,15 +24,17 @@
 #![allow(unused_assignments, unused_variables)] // `read_ptr!`
 
 
-#[cfg(test)]
-extern crate test;
+// unstable
+//#[cfg(test)]
+// extern crate test;
 
 use std::mem::{uninitialized, transmute};
 use std::ptr::{copy};
 use std::hash::{Hash, Hasher};
 use std::default::Default;
 
-#[cfg(test)] use test::Bencher;
+//unstable
+//#[cfg(test)] use test::Bencher;
 
 pub mod macros;
 pub mod xxh32;
@@ -289,7 +291,8 @@ fn test_base<F>(f: F) where F: Fn(&[u8], u64) -> u64 {
     test(BUFSIZE,          PRIME as u64,  0xCAA65939306F1E21);
 }
 
-#[cfg(test)]
+//unstable
+/*#[cfg(test)]
 #[inline(always)]
 fn bench_base<F>(bench: &mut Bencher, f: F )
     where F: Fn(&[u8]) -> u64
@@ -303,7 +306,7 @@ fn bench_base<F>(bench: &mut Bencher, f: F )
 
     bench.iter( || f(v.as_slice()) );
     bench.bytes = BUFSIZE as u64;
-}
+}*/
 
 #[test]
 fn test_oneshot() {
@@ -325,10 +328,11 @@ fn test_chunks() {
     })
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_64k_oneshot(b: &mut Bencher) {
     bench_base(b, |v| oneshot(v, 0))
-}
+}*/
 
 /*
     * The following tests match those of SipHash.
@@ -413,7 +417,8 @@ fn test_hash_no_concat_alias() {
     assert!(hash(&v) != hash(&w));
 }
 
-#[bench]
+// unstable
+/*#[bench]
 fn bench_str_under_8_bytes(b: &mut Bencher) {
     let s = "foo";
     b.bytes=s.len() as u64;
@@ -461,7 +466,7 @@ fn bench_u64(b: &mut Bencher) {
     b.iter(|| {
         hash(&u)
     })
-}
+}*/
 
 
 
